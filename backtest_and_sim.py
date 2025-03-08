@@ -30,57 +30,56 @@ trading_days = 252
 start_price = 50000
 starting_value = 10000
 rf_rate = 1.03 ** (1 / trading_days) - 1
+
 monthly_addition = 10000
 days_simulated = (trading_days * 15) 
 number_of_simulations = 15000
-
-# %%
-
+    
+#%%
 '''SETUP SECTION'''
 
 window_size = 200
 
-spy_file_path = cwd / 'portfolio_data' / 'spy.xlsx'
-sso_file_path = cwd / 'portfolio_data' / 'sso.xlsx'
-upro_file_path = cwd / 'portfolio_data' / 'upro.xlsx'
-ffr_file_path = cwd / 'portfolio_data' /  'ffr.xlsx'
-gld_file_path = cwd / 'portfolio_data' /  'goldx.xlsx'
-zroz_file_path = cwd / 'portfolio_data' /  'zroz.xlsx'
-hfea_file_path = cwd / 'portfolio_data' /  'hfea.xlsx'
+tickers = ['spy', 'sso', 'upro', 'ffr', 'goldx', 'zroz', 'hfea']
 
-sp500_price = pd.read_excel(spy_file_path, index_col='Date', parse_dates=True)
+# Load all files in one-liner dictionary comprehension
+prices_dfs = {ticker: pd.read_excel(cwd / 'portfolio_data' / f'{ticker}.xlsx', 
+                           index_col='Date', parse_dates=True) for ticker in tickers}
 
-spy = sp500_price.pct_change().dropna(subset='SPY')
-sso = pd.read_excel(sso_file_path, index_col='Date', parse_dates=True).pct_change().dropna()
-upro = pd.read_excel(upro_file_path, index_col='Date', parse_dates=True).pct_change().dropna()
-ffr = pd.read_excel(ffr_file_path, index_col='Date', parse_dates=True).pct_change().dropna()
-gld = pd.read_excel(gld_file_path, index_col='Date', parse_dates=True).pct_change().dropna()
-zroz = pd.read_excel(zroz_file_path, index_col='Date', parse_dates=True).pct_change().dropna()
-hfea = pd.read_excel(hfea_file_path, index_col='Date', parse_dates=True).pct_change().dropna()
+# Keep price series and create returns
+sp500_price = prices_dfs['spy'].copy() 
+pcnt_dfs = {ticker: df.pct_change().dropna() for ticker, df in prices_dfs.items()}
+
+# Calculate MA and assign variables
+sp500_price['SPY_MA'] = sp500_price['SPY'].rolling(window=window_size).mean()
+spy, sso, upro, ffr, gld, zroz, hfea = [pcnt_dfs[ticker] for ticker in tickers]
 
 for df in [sp500_price, spy, sso, upro, ffr, gld, zroz]:
     df.index = pd.to_datetime(df.index, format='mixed')
-    
-sp500_price['SPY_MA'] = sp500_price['SPY'].rolling(window=window_size).mean()
-# sp500_price.plot(logy=True)
- 
+
+#%% See SPY moving average    
+
+sp500_price['SPY_MA'] = sp500_price['SPY'].rolling(window=window_size, min_periods=1).mean()
+sp500_price.plot(logy=True)
+
+#%%
+# Define ETF Expense and Leverage Ratios
+etf_params = {
+    'VOO': {'lr': 1, 'er': 0.0003},
+    'SSO': {'lr': 2, 'er': 0.0089},
+    'UPRO': {'lr': 3, 'er': 0.0091}
+}
+
 daily_pcnt = pd.concat([spy, ffr, gld, zroz, hfea], axis=1)
  
 '''Below we calculate the expected returns of the SSO and UPRO considering 
 the borrowing costs and the expense ratios. We then calculate the isolated 
 tracking error that is caused from algorithms and optimisation.'''
 
-daily_pcnt['VOO'] = ((daily_pcnt['SPY'] * voo_lr) 
-                   - ((voo_lr - 1) * (daily_pcnt['FFR'] + borrowing_spread / trading_days)) 
-                   -  ((1 + voo_er) ** (1/trading_days) - 1))
-
-daily_pcnt['SSO'] = ((daily_pcnt['SPY'] * sso_lr) 
-                   - ((sso_lr - 1) * (daily_pcnt['FFR'] + borrowing_spread / trading_days)) 
-                   -  ((1 + sso_er) ** (1/trading_days) - 1))
-
-daily_pcnt['UPRO'] = ((daily_pcnt['SPY'] * upro_lr)
-                    - ((upro_lr - 1) * (daily_pcnt['FFR'] + borrowing_spread / trading_days))
-                    - ((1 + upro_er) ** (1/trading_days) - 1))
+for etf, params in etf_params.items():
+    daily_pcnt[etf] = ((daily_pcnt['SPY'] * params['lr']) 
+                      - ((params['lr'] - 1) * (daily_pcnt['FFR'] + borrowing_spread / trading_days))
+                      - ((1 + params['er']) ** (1/trading_days) - 1))
 
 #%%
 ''''Compare calclated expected returns with actual returns to find tracking errors'''
@@ -88,14 +87,19 @@ daily_pcnt['UPRO'] = ((daily_pcnt['SPY'] * upro_lr)
 sso['SSO Simulated'] = daily_pcnt['SSO']
 upro['UPRO Simulated'] = daily_pcnt['UPRO']
 
-sso['T.E'] = sso['SSO Simulated'] - sso['SSO']
-upro['T.E'] = upro['UPRO Simulated'] - upro['UPRO']
+sso['T.E.'] = sso['SSO Simulated'] - sso['SSO']
+upro['T.E.'] = upro['UPRO Simulated'] - upro['UPRO']
 
 sso_price = starting_value * (1 + sso).cumprod()
 upro_price = starting_value * (1 + upro).cumprod()
     
+#%% Plot Simulated and Actual LETFs
 sso_price[['SSO', 'SSO Simulated']].plot(logy=True)
 upro_price[['UPRO', 'UPRO Simulated']].plot(logy=True)
+
+# Plot tracking errors
+sso['T.E.'].plot()
+upro['T.E.'].plot()
 
 # %%
 
@@ -369,8 +373,6 @@ plot_metric_comparison(rolling_analysis, 'Volatility (%)')
 plot_metric_comparison(rolling_analysis, 'Sharpe')
 plot_metric_comparison(rolling_analysis, 'Sortino')
 plot_metric_comparison(rolling_analysis, 'Maximum Drawdown (%)')
-
-
 
 # %%
 '''LEVERAGE ROTATION STRATEGY'''
@@ -672,14 +674,14 @@ for i in range(number_of_simulations):
  
     simulated_sso = pd.Series(np.random.choice(sso['T.E.'].values, size=days_simulated) +
                               simulated_spy['SPY'] * 2
-                              - ((sso_lr - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
-                              - (sso_er / 365)).reset_index(drop=True)
+                              - ((etf_params['SSO']['lr'] - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
+                              - (etf_params['SSO']['er'] / 365)).reset_index(drop=True)
     
     simulated_upro = pd.Series(np.random.choice(upro['T.E.'].values, size=days_simulated) +
                                simulated_spy['SPY'] * 3
-                               - ((upro_lr - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
-                               - (upro_er / 365)).reset_index(drop=True)
- 
+                               - ((etf_params['UPRO']['lr'] - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
+                               - (etf_params['UPRO']['er'] / 365)).reset_index(drop=True)
+
     simulated_spy = pd.Series(simulated_spy['SPY'])
  
     '''Below we simulate the portfolio value growth over time using the
@@ -715,8 +717,7 @@ for i in range(number_of_simulations):
  
 potential_final_pf_tracker = pd.DataFrame(rows)
 percentile_results = potential_final_pf_tracker.quantile(percentiles)
- 
- 
+
 def format_currency(value):
     return f'${value:,.0f}'
  
