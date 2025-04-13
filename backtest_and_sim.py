@@ -70,7 +70,7 @@ etf_params = {
     'UPRO': {'lr': 3, 'er': 0.0091}
 }
 
-daily_pcnt = pd.concat([spy, ffr, gld, zroz, hfea], axis=1)
+daily_pcnt = pd.concat([spy, ffr, gld, zroz], axis=1)
  
 '''Below we calculate the expected returns of the SSO and UPRO considering 
 the borrowing costs and the expense ratios. We then calculate the isolated 
@@ -97,7 +97,7 @@ upro_price = starting_value * (1 + upro).cumprod()
 sso_price[['SSO', 'SSO Simulated']].plot(logy=True)
 upro_price[['UPRO', 'UPRO Simulated']].plot(logy=True)
 
-# Plot tracking errors
+#%% Plot tracking errors
 sso['T.E.'].plot()
 upro['T.E.'].plot()
 
@@ -108,9 +108,9 @@ for all sources.'''
 
 combined_df_3 = pd.concat([spy, ffr], axis=1).dropna()
 
-daily_pcnt['60/40_SSO_ZROZ'] = 0.6 * daily_pcnt['SSO'] + 0.4 * daily_pcnt['ZROZ']
+# daily_pcnt['60/40_SSO_ZROZ'] = 0.6 * daily_pcnt['SSO'] + 0.4 * daily_pcnt['ZROZ']
 
-daily_pcnt['50/25/25_SSO_ZROZ_GLD'] = 0.5 * daily_pcnt['SSO'] + 0.25 * daily_pcnt['ZROZ'] + 0.25 * daily_pcnt['GLD']
+# daily_pcnt['50/25/25_SSO_ZROZ_GLD'] = 0.5 * daily_pcnt['SSO'] + 0.25 * daily_pcnt['ZROZ'] + 0.25 * daily_pcnt['GLD']
 
 portfolios = starting_value * (1 + daily_pcnt).cumprod()
 pf_tracker = portfolios.copy()
@@ -121,7 +121,8 @@ portfolios.plot(logy=True, grid=True)
 
 # %%
 
-def calculate_metrics(period_data, df=False, reindex=False, start_date=None, end_date=None, ffr_data = ffr['FFR']):
+def calculate_metrics(period_data, df=False, reindex=False, start_date=None, end_date=None,
+                      pcnt_df=daily_pcnt, ffr_col='FFR'):
     if reindex:
         period_data = period_data.dropna(axis=0)
         
@@ -133,7 +134,7 @@ def calculate_metrics(period_data, df=False, reindex=False, start_date=None, end
     
     # Get price data for the specified period
     period_data = period_data.loc[start_date:end_date]
-    ffr_period = ffr_data.loc[start_date:end_date]
+    ffr_period = pcnt_df[ffr_col].loc[start_date:end_date]
     
     # Calculate daily returns
     returns = period_data.pct_change().dropna()
