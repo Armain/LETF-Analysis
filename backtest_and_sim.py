@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore', category=Warning)
 
 cwd = Path(__file__).parent
 sys.path.append(str(cwd))
@@ -108,9 +108,9 @@ for all sources.'''
 
 combined_df_3 = pd.concat([spy, ffr], axis=1).dropna()
 
-# daily_pcnt['60/40_SSO_ZROZ'] = 0.6 * daily_pcnt['SSO'] + 0.4 * daily_pcnt['ZROZ']
+daily_pcnt['60/40_SSO_ZROZ'] = 0.6 * daily_pcnt['SSO'] + 0.4 * daily_pcnt['ZROZ']
 
-# daily_pcnt['50/25/25_SSO_ZROZ_GLD'] = 0.5 * daily_pcnt['SSO'] + 0.25 * daily_pcnt['ZROZ'] + 0.25 * daily_pcnt['GLD']
+daily_pcnt['50/25/25_SSO_ZROZ_GLD'] = 0.5 * daily_pcnt['SSO'] + 0.25 * daily_pcnt['ZROZ'] + 0.25 * daily_pcnt['GLD']
 
 portfolios = starting_value * (1 + daily_pcnt).cumprod()
 pf_tracker = portfolios.copy()

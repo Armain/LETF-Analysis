@@ -1,0 +1,18 @@
+# LETF Analysis - Minimal Requirements
+# Python 3.12.3
+
+# Core data manipulation
+numpy==2.1.3
+pandas==2.2.3
+
+# Visualization
+matplotlib==3.9.2
+plotly==5.24.1
+
+# Data fetching
+pandas-datareader==0.10.0  # Used in backtest_and_sim.py
+yfinance==0.2.57           # Used in mc_test.py
+requests==2.32.3           # Used in sp500_plot.py
+
+# Excel file handling
+openpyxl==3.1.5
