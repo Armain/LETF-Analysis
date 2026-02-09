@@ -176,9 +176,9 @@ def calculate_metrics(period_data, df=False, reindex=False, start_date=None, end
     portfolios = returns.columns
     # Calculate metrics for each portfolio
     if df:
-        metrics = pd.DataFrame(index=portfolios, columns=['CAGR (%)', 'Volatility (%)', 
-                                               'Sharpe', 'Sortino', 'Maximum Drawdown (%)'])
-    else: 
+        metrics = pd.DataFrame(index=portfolios, columns=['CAGR (%)', 'Volatility (%)',
+                                               'Sharpe', 'Sortino', 'Profit Factor', 'Maximum Drawdown (%)'])
+    else:
         metrics = {}
     for portfolio in portfolios:
         if portfolio == 'FFR':
@@ -187,38 +187,45 @@ def calculate_metrics(period_data, df=False, reindex=False, start_date=None, end
         # CAGR (%)
         n_years = (period_data.index[-1] - period_data.index[0]).days / 365.25
         cagr = 100 * ((period_data[portfolio].iloc[-1] / period_data[portfolio].iloc[0]) ** (1/n_years) - 1)
-        
+
         # Volatility (%)
         annual_vol = 100 * returns[portfolio].std() * np.sqrt(trading_days)
-        
+
         # Sharpe Ratio
         aligned_ffr = ffr_period.reindex(returns.index)
         excess_returns = returns[portfolio] - aligned_ffr
         sharpe = np.sqrt(trading_days) * excess_returns.mean() / returns[portfolio].std()
-        
+
         # Sortino Ratio
         downside_returns = returns[portfolio][returns[portfolio] < 0]
         downside_std = downside_returns.std() * np.sqrt(trading_days)
         sortino = np.sqrt(trading_days) * excess_returns.mean() / downside_std
-        
+
+        # Profit Factor
+        gains = returns[portfolio][returns[portfolio] > 0].sum()
+        losses = abs(returns[portfolio][returns[portfolio] < 0].sum())
+        profit_factor = gains / losses if losses != 0 else np.inf
+
         # Maximum Drawdown (%)
         cumulative_returns = (1 + returns[portfolio]).cumprod()
         rolling_max = cumulative_returns.expanding().max()
         drawdowns = cumulative_returns/rolling_max - 1
         max_drawdown = 100 * drawdowns.min()
-        
+
         if df:
             metrics.loc[portfolio, 'CAGR (%)'] = cagr
             metrics.loc[portfolio, 'Volatility (%)'] = annual_vol
             metrics.loc[portfolio, 'Sharpe'] = sharpe
             metrics.loc[portfolio, 'Sortino'] = sortino
+            metrics.loc[portfolio, 'Profit Factor'] = profit_factor
             metrics.loc[portfolio, 'Maximum Drawdown (%)'] = max_drawdown
-        else:    
+        else:
             # Store metrics
             metrics[f'{portfolio} CAGR (%)'] = cagr
             metrics[f'{portfolio} Volatility (%)'] = annual_vol
             metrics[f'{portfolio} Sharpe'] = sharpe
             metrics[f'{portfolio} Sortino'] = sortino
+            metrics[f'{portfolio} Profit Factor'] = profit_factor
             metrics[f'{portfolio} Maximum Drawdown (%)'] = max_drawdown
     
     if df:
@@ -294,7 +301,7 @@ def analyze_rolling_periods(portfolio, period_length, consider_tax=False, daily_
     
     # Calculate win_rate statistics
     win_rate_stats = {}
-    metric_types = ['CAGR (%)', 'Sharpe', 'Sortino', 'Volatility (%)', 'Maximum Drawdown (%)']
+    metric_types = ['CAGR (%)', 'Sharpe', 'Sortino', 'Profit Factor', 'Volatility (%)', 'Maximum Drawdown (%)']
     
     for metric in metric_types:
         benchmark_col = f'VOO {metric}'
@@ -374,6 +381,7 @@ plot_metric_comparison(rolling_analysis, 'CAGR (%)')
 plot_metric_comparison(rolling_analysis, 'Volatility (%)')
 plot_metric_comparison(rolling_analysis, 'Sharpe')
 plot_metric_comparison(rolling_analysis, 'Sortino')
+plot_metric_comparison(rolling_analysis, 'Profit Factor')
 plot_metric_comparison(rolling_analysis, 'Maximum Drawdown (%)')
 
 # %%
@@ -486,7 +494,7 @@ def analyze_multi_period_win_rate(portfolio, max_months=360, step=12, consider_t
         win_rate_results[period_length] = win_rate_df
     
     # Restructure data for plotting
-    metrics = ['CAGR (%)', 'Sharpe', 'Sortino']
+    metrics = ['CAGR (%)', 'Sharpe', 'Sortino', 'Profit Factor']
     plot_data = {metric: pd.DataFrame() for metric in metrics}
     
     for period_length, df in win_rate_results.items():
@@ -579,34 +587,31 @@ def apply_final_tax(pf_tracker_df, cost_basis):
     return df_final
 
 # Usage:
-# First apply trade taxes
-pf_tracker2, cost_basis = apply_trade_taxes(pf_tracker, daily_pcnt, starting_value)
+# First apply trade taxes, then apply final tax
 
-# Then apply final tax
-pf_tracker_net = apply_final_tax(pf_tracker2, cost_basis)
+#pf_tracker2, cost_basis = apply_trade_taxes(pf_tracker, daily_pcnt, starting_value)
+#pf_tracker_net = apply_final_tax(pf_tracker2, cost_basis)
 
 
 # Plot comparison including net values for LRS strategies
-net_cols = ['SPY_net', 'VOO_LRS_net', 'SSO_LRS_net', 'UPRO_LRS_net']
-lrs_taxed_pf = lrs_portfolios.copy()
-lrs_taxed_pf[net_cols] = pf_tracker_net[net_cols]
+#net_cols = ['SPY_net', 'VOO_LRS_net', 'SSO_LRS_net', 'UPRO_LRS_net']
+#lrs_taxed_pf = lrs_portfolios.copy()
+#lrs_taxed_pf[net_cols] = pf_tracker_net[net_cols]
 
-lrs_taxed_pf.plot(logy=True)
-plt.title('Portfolio Values (Before and After Trade Taxes)')
-plt.grid(True)
-plt.show()
+#lrs_taxed_pf.plot(logy=True)
+#plt.title('Portfolio Values (Before and After Trade Taxes)')
+#plt.grid(True)
+#plt.show()
 
 # %%
-period_length = 240
+# period_length = 240
 
-taxed_lrs_rolling_analysis = analyze_rolling_periods(lrs_portfolios, period_length, 
-                                               consider_tax=True, 
-                                               daily_pcnt_df=daily_pcnt)
+# taxed_lrs_rolling_analysis = analyze_rolling_periods(lrs_portfolios, period_length, 
+#                                                consider_tax=True, 
+#                                                daily_pcnt_df=daily_pcnt)
 
-# rolling_analysis_taxed360.to_xlsx('D:/Schoolwork - McGill/Other/LETF Analysis/360m_spy_letf_rolling_analysis_taxed.xlsx', index=False)
-
-plot_metric_comparison(taxed_lrs_rolling_analysis, 'CAGR (%)', show_tax=False)
-plot_metric_comparison(taxed_lrs_rolling_analysis, 'CAGR (%)', show_tax=True)
+# plot_metric_comparison(taxed_lrs_rolling_analysis, 'CAGR (%)', show_tax=False)
+# plot_metric_comparison(taxed_lrs_rolling_analysis, 'CAGR (%)', show_tax=True)
 
 # For taxed analysis:(way too long)
 # plot_data_taxed = analyze_multi_period_win_rate(lrs_portfolios, max_months=360, step=12, consider_tax=True, daily_pcnt_df=daily_pcnt)
