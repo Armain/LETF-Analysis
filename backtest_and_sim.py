@@ -615,113 +615,168 @@ plot_metric_comparison(taxed_lrs_rolling_analysis, 'CAGR (%)', show_tax=True)
 # %% SIMULATION SECTION
 
 start_price = 50000
-monthly_addition = 10000
-days_simulated = (trading_days * 15) 
+monthly_addition = 0
+days_simulated = (trading_days * 20)
 number_of_simulations = 10
- 
-rows = []
-percentiles = [0.01, 0.05, 0.10, 0.25, 0.40, 0.50, 0.60, 0.75, 0.90, 0.95, 0.99]
- 
-for i in range(number_of_simulations):
- 
-    print(f'#{i + 1}')
- 
-    '''Below we simulate the S&P500. This is the most critical step because
-    the simulated SSO and UPRO is simply 2x/3x this simulation, plus the 
-    borrowing costs and expense ratio, and some randomized tracking 
-    error. We use the block bootstrap method to simulate
-    this instead of the bootstrap method, so we capture any auto-correlation.
- 
-    simulated_spy: a simulated path of the S&P500's daily returns for a
-    specified amount of days, stored in a pandas dataframe as decimals. The 
-    federal funds rate (FRR) is also stored in this dataframe.'''
- 
-    block_size = 7  # days
+block_size = 7
+ma_window = window_size
+
+portfolios_list = ['SPY', 'SSO', 'UPRO', 'SSO_LRS', 'UPRO_LRS']
+simulation_results = {pf: [] for pf in portfolios_list}
+simulation_paths = []
+
+for sim in range(number_of_simulations):
+    print(f'#{sim + 1}')
+
+    '''Below we simulate the S&P500 using block bootstrap method to capture
+    auto-correlation. Each block is 7 days of SPY+FFR returns sampled from
+    historical data.'''
+
     if block_size > len(combined_df):
         sys.exit('ERROR: Block size is greater than the sample size')
     n_blocks = len(combined_df) - block_size + 1
-    blocks = []
-    for i in range(n_blocks):
-        block = combined_df.iloc[i:i + block_size]
-        blocks.append(block)
- 
-    required_n_blocks = math.ceil(days_simulated / block_size)
-    simulated_blocks = []
-    for n in range(required_n_blocks):
-        random_i = random.randint(0, len(blocks) - 1)
-        random_block = blocks[random_i]
-        simulated_blocks.append(random_block)
- 
-    simulated_spy = pd.concat(simulated_blocks).reset_index(drop=True)
-    days_to_subtract = required_n_blocks * block_size - days_simulated
-    simulated_spy = simulated_spy.iloc[:len(simulated_spy) - days_to_subtract]
- 
-    '''Below we simulate the SSO and UPRO beyond their inception dates.
-    To do this, we take the simulated S&P500 above, and multiply each daily
-    return by 2x for the SSO and 3x for the UPRO. We subtract the expected 
-    borrowing costs using the interest rates at that time, subtract the 
-    expense ratios
- 
-    simulated_sso: a simulated path of the SSO's daily returns for a
-    specified amount of days, stored in a pandas dataframe as decimals.
-    simulated_upro: same as simulated_sso but for the UPRO ETF.'''
- 
-    simulated_sso = pd.Series(simulated_spy['SPY'] * 2
-                              - ((etf_params['SSO']['lr'] - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
-                              - (etf_params['SSO']['er'] / 365)).reset_index(drop=True)
-    
-    simulated_upro = pd.Series(simulated_spy['SPY'] * 3
-                               - ((etf_params['UPRO']['lr'] - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
-                               - (etf_params['UPRO']['er'] / 365)).reset_index(drop=True)
+    blocks = [combined_df.iloc[i:i + block_size] for i in range(n_blocks)]
 
-    simulated_spy = pd.Series(simulated_spy['SPY'])
- 
-    '''Below we simulate the portfolio value growth over time using the
-    simulated ETF path performed above, using the initial deposit and the
-    monthly contributions which are added approximately every 21 trading 
-    days.'''
- 
-    simulated_spy_pf_tracker_with_additions = np.zeros(len(simulated_spy) + 1)
-    simulated_spy_pf_tracker_with_additions[0] = start_price
-    simulated_sso_pf_tracker_with_additions = np.zeros(len(simulated_sso) + 1)
-    simulated_sso_pf_tracker_with_additions[0] = start_price
-    simulated_upro_pf_tracker_with_additions = np.zeros(len(simulated_upro) + 1)
-    simulated_upro_pf_tracker_with_additions[0] = start_price
- 
-    for t in range(1, len(simulated_spy) + 1):
-        simulated_spy_pf_tracker_with_additions[t] = simulated_spy_pf_tracker_with_additions[t - 1] * (1 + simulated_spy[t - 1])
-        simulated_sso_pf_tracker_with_additions[t] = simulated_sso_pf_tracker_with_additions[t - 1] * (1 + simulated_sso[t - 1])
-        simulated_upro_pf_tracker_with_additions[t] = simulated_upro_pf_tracker_with_additions[t - 1] * (1 + simulated_upro[t - 1])
-        if t % 21 == 0:
-            simulated_spy_pf_tracker_with_additions[t] += monthly_addition
-            simulated_sso_pf_tracker_with_additions[t] += monthly_addition
-            simulated_upro_pf_tracker_with_additions[t] += monthly_addition
- 
-    rows.append({
-        'spy_Final': simulated_spy_pf_tracker_with_additions[-1],
-        'SSO_Final': simulated_sso_pf_tracker_with_additions[-1],
-        'UPRO_Final': simulated_upro_pf_tracker_with_additions[-1]
-    })
+    total_days_needed = days_simulated + ma_window
+    required_n_blocks = math.ceil(total_days_needed / block_size)
+    simulated_blocks = [blocks[random.randint(0, len(blocks) - 1)] for _ in range(required_n_blocks)]
+
+    simulated_data = pd.concat(simulated_blocks).reset_index(drop=True)
+    days_to_subtract = required_n_blocks * block_size - total_days_needed
+    simulated_data = simulated_data.iloc[:len(simulated_data) - days_to_subtract]
+    
+    print(float(pcnt_dfs['spy'].mean()), float(pcnt_dfs['spy'].std()))
+    print(float(simulated_data['SPY'].mean()), float(simulated_data['SPY'].std()))
+
+    '''Below we calculate returns for all strategies: SPY, SSO, UPRO (2x/3x
+    leveraged versions), and LRS variants that rotate to cash based on MA200 signal.'''
+
+    returns_df = pd.DataFrame(index=range(len(simulated_data)))
+    returns_df['SPY'] = simulated_data['SPY'].values
+    returns_df['FFR'] = simulated_data['FFR'].values
+
+    # Calculate leveraged ETF returns
+    returns_df['SSO'] = (returns_df['SPY'] * 2
+                         - ((etf_params['SSO']['lr'] - 1) * (returns_df['FFR'] + borrowing_spread / 360))
+                         - (etf_params['SSO']['er'] / 365))
+
+    returns_df['UPRO'] = (returns_df['SPY'] * 3
+                          - ((etf_params['UPRO']['lr'] - 1) * (returns_df['FFR'] + borrowing_spread / 360))
+                          - (etf_params['UPRO']['er'] / 365))
+
+    # Calculate MA200 signal for LRS strategies
+    spy_price = (1 + returns_df['SPY']).cumprod()
+    spy_ma = spy_price.rolling(window=ma_window).mean()
+    signal = (spy_price > spy_ma).astype(int).shift(1, fill_value=1)
+
+    # Remove first ma_window days to avoid partial MA calculations
+    returns_df = returns_df.iloc[ma_window:].reset_index(drop=True)
+    spy_price_trimmed = spy_price.iloc[ma_window:].reset_index(drop=True)
+    spy_ma_trimmed = spy_ma.iloc[ma_window:].reset_index(drop=True)
+    returns_df['LRS_Signal'] = signal.iloc[ma_window:].reset_index(drop=True)
+
+    # LRS: hold leveraged ETF when SPY > MA, else hold cash (FFR)
+    returns_df['SSO_LRS'] = returns_df['SSO'] * returns_df['LRS_Signal'] + returns_df['FFR'] * (1 - returns_df['LRS_Signal'])
+    returns_df['UPRO_LRS'] = returns_df['UPRO'] * returns_df['LRS_Signal'] + returns_df['FFR'] * (1 - returns_df['LRS_Signal'])
+
+    '''Calculate portfolio values with monthly contributions (every 21 trading days).'''
+
+    if monthly_addition == 0:
+        pf_values = start_price * (1 + returns_df.drop('LRS_Signal', axis=1)).cumprod()
+        pf_values = pd.concat([pd.DataFrame(start_price, index=[0], columns=portfolios_list), pf_values]).reset_index(drop=True)
+    else:
+        pf_values = pd.DataFrame(start_price, index=range(len(returns_df) + 1), columns=portfolios_list)
+        for t in range(1, len(returns_df) + 1):
+            for pf in portfolios_list:
+                pf_values.loc[t, pf] = pf_values.loc[t - 1, pf] * (1 + returns_df.loc[t - 1, pf])
+                if t % 21 == 0:
+                    pf_values.loc[t, pf] += monthly_addition
+
+    # Store final values and paths
+    for pf in portfolios_list:
+        simulation_results[pf].append(pf_values.iloc[-1][pf])
+    simulation_paths.append(pf_values.copy())
+
+    trades = abs(returns_df['LRS_Signal'].diff()).sum()
+    trades_per_year = trades / (days_simulated / trading_days)
+    print(f'Trades: {trades}, Trades/year: {trades_per_year:.1f}')
+
+    plt.figure()
+    plt.plot(spy_price_trimmed * start_price, label='SPY')
+    plt.plot(spy_ma_trimmed * start_price, label='MA200', linestyle='--')
+    for pf in ['SSO_LRS']:
+        plt.plot(pf_values[pf], label=pf)
+    plt.yscale('log')
+    plt.legend()
+    plt.show()
  
 #%%
- 
-'''Below is where all of the results are summarized and visualized.'''
- 
-potential_final_pf_tracker = pd.DataFrame(rows)
-percentile_results = potential_final_pf_tracker.quantile(percentiles)
+
+'''Results summary and visualization.'''
+
+results_df = pd.DataFrame(simulation_results)
+percentiles = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+percentile_results = results_df.quantile(percentiles)
 
 def format_currency(value):
     return f'${value:,.0f}'
- 
- 
-formatted_percentile_results = percentile_results.apply(lambda x: x.map(format_currency))
+
+formatted_results = percentile_results.apply(lambda x: x.map(format_currency))
 print('\n\nPercentiles of Final Outcomes:')
-print(formatted_percentile_results)
- 
+print(formatted_results)
+
 print('\n')
 print(f'{days_simulated / trading_days} years in the market')
-print(f'${start_price + monthly_addition * (days_simulated / 21)} total invested')
-print(f'${start_price} initial investment, ${monthly_addition} monthly additions')
-print(f'{spy.index[0].strftime('%Y-%m-%d')} historical data start date')
-print(f'{spy.index[-1].strftime('%Y-%m-%d')} historical data end date')
+print(f'${start_price + monthly_addition * (days_simulated / 21):,.0f} total invested')
+print(f'${start_price:,.0f} initial investment, ${monthly_addition:,.0f} monthly additions')
+print(f'{spy.index[0].strftime("%Y-%m-%d")} historical data start date')
+print(f'{spy.index[-1].strftime("%Y-%m-%d")} historical data end date')
 print(f'{number_of_simulations} simulations')
+
+# %% Visualization
+
+stats_df = pd.DataFrame({
+    'Mean': results_df.mean(),
+    '5th %ile': results_df.quantile(0.05),
+    '95th %ile': results_df.quantile(0.95)
+})
+
+x = np.arange(len(portfolios_list))
+width = 0.25
+
+plt.figure(figsize=(10, 6))
+plt.bar(x - width, stats_df['5th %ile'], width, label='5th percentile', alpha=0.7)
+plt.bar(x, stats_df['Mean'], width, label='Mean', alpha=0.7)
+plt.bar(x + width, stats_df['95th %ile'], width, label='95th percentile', alpha=0.7)
+
+plt.ylabel('Portfolio Value ($)')
+plt.title('Monte Carlo Results: Final Portfolio Values')
+plt.xticks(x, portfolios_list)
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# %% Path Visualization
+
+percentiles_to_plot = [0.05, 0.50, 0.95]
+
+for percentile in percentiles_to_plot:
+    percentile_idx = int(percentile * number_of_simulations)
+    sorted_indices = np.argsort(results_df['SPY'].values)
+    path_idx = sorted_indices[percentile_idx]
+
+    path = simulation_paths[path_idx]
+
+    plt.figure(figsize=(12, 7))
+    for pf in portfolios_list:
+        plt.plot(path[pf], label=pf, linewidth=2)
+
+    plt.xlabel('Days')
+    plt.ylabel('Portfolio Value ($)')
+    plt.title(f'Portfolio Paths at {int(percentile*100)}th Percentile (SPY outcome)')
+    plt.legend()
+    plt.yscale('log')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
