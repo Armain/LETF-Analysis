@@ -530,6 +530,177 @@ def plot_win_rate(plot_data):
 plot_data = analyze_multi_period_win_rate(lrs_portfolios, max_months=360, step=12)
 plot_win_rate(plot_data)
 
+# %% IN-SAMPLE MONTE CARLO PERMUTATION TEST (MCPT)
+
+'''Test whether LRS strategy performance is due to real patterns in the data
+or could have been achieved by chance (data mining bias). Grid searches MA windows
+50-400 (step 25) on real data and on each permutation, picks the best Sharpe,
+and compares best-vs-best. This properly accounts for data mining bias from
+choosing the MA window.'''
+
+n_permutations = 1000
+mcpt_portfolios = ['SSO_LRS', 'UPRO_LRS']
+ma_grid = np.arange(150, 401, 25)
+
+def mcpt_optimize_lrs(spy_returns, ffr_returns):
+    '''Grid search MA windows, return best Sharpe for SSO_LRS and UPRO_LRS.'''
+    sso_returns = (spy_returns * etf_params['SSO']['lr']
+                   - (etf_params['SSO']['lr'] - 1) * (ffr_returns + borrowing_spread / trading_days)
+                   - ((1 + etf_params['SSO']['er']) ** (1/trading_days) - 1))
+    upro_returns = (spy_returns * etf_params['UPRO']['lr']
+                    - (etf_params['UPRO']['lr'] - 1) * (ffr_returns + borrowing_spread / trading_days)
+                    - ((1 + etf_params['UPRO']['er']) ** (1/trading_days) - 1))
+    spy_price = (1 + spy_returns).cumprod()
+
+    best_sharpe = {pf: -np.inf for pf in mcpt_portfolios}
+    best_window = {pf: None for pf in mcpt_portfolios}
+
+    for w in ma_grid:
+        ma = spy_price.rolling(window=w).mean()
+        signal = (spy_price > ma).astype(int).shift(1, fill_value=1)
+
+        # Trim MA warmup
+        sig = signal.iloc[w:].reset_index(drop=True)
+        ffr_t = ffr_returns.iloc[w:].reset_index(drop=True)
+        sso_t = sso_returns.iloc[w:].reset_index(drop=True)
+        upro_t = upro_returns.iloc[w:].reset_index(drop=True)
+
+        sso_lrs = sso_t * sig + ffr_t * (1 - sig)
+        upro_lrs = upro_t * sig + ffr_t * (1 - sig)
+
+        for pf, ret in [('SSO_LRS', sso_lrs), ('UPRO_LRS', upro_lrs)]:
+            sharpe = np.sqrt(trading_days) * (ret - ffr_t).mean() / ret.std()
+            if sharpe > best_sharpe[pf]:
+                best_sharpe[pf] = sharpe
+                best_window[pf] = w
+
+    return best_sharpe, best_window
+
+# Optimize on real data
+real_sharpe, real_best_window = mcpt_optimize_lrs(combined_df['SPY'], combined_df['FFR'])
+
+print('Real best Sharpe (optimized MA window):')
+for pf in mcpt_portfolios:
+    print(f'  {pf}: {real_sharpe[pf]:.4f} (MA{real_best_window[pf]})')
+
+perm_better_count = {pf: 1 for pf in mcpt_portfolios}
+permuted_sharpes = {pf: [] for pf in mcpt_portfolios}
+
+for i in range(1, n_permutations):
+    if i % 100 == 0:
+        print(f'Permutation {i}/{n_permutations}')
+
+    perm_data = combined_df.sample(frac=1).reset_index(drop=True)
+    perm_sharpe, _ = mcpt_optimize_lrs(perm_data['SPY'], perm_data['FFR'])
+
+    for pf in mcpt_portfolios:
+        permuted_sharpes[pf].append(perm_sharpe[pf])
+        if perm_sharpe[pf] >= real_sharpe[pf]:
+            perm_better_count[pf] += 1
+
+print('\nIn-Sample MCPT Results:')
+for pf in mcpt_portfolios:
+    p_value = perm_better_count[pf] / n_permutations
+    print(f'  {pf}: p-value = {p_value:.4f} ({perm_better_count[pf]}/{n_permutations} permutations >= real)')
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+for ax, pf in zip(axes, mcpt_portfolios):
+    ax.hist(permuted_sharpes[pf], bins=50, color='steelblue', edgecolor='black', alpha=0.7)
+    ax.axvline(real_sharpe[pf], color='red', linewidth=2, label=f'Real ({real_sharpe[pf]:.3f})')
+    p_val = perm_better_count[pf] / n_permutations
+    ax.set_title(f'{pf} In-Sample MCPT (p={p_val:.4f})')
+    ax.set_xlabel('Sharpe Ratio')
+    ax.set_ylabel('Count')
+    ax.legend()
+plt.tight_layout()
+plt.show()
+
+# %% WALK-FORWARD MONTE CARLO PERMUTATION TEST
+
+'''Optimize MA window on pre-2000 data (training), then test fixed MA on post-2000
+data (out-of-sample). Permute only the out-of-sample portion to test whether
+the walk-forward performance was luck or real pattern persistence.'''
+
+wf_n_permutations = 1000
+wf_split = '2000-01-01'
+
+# Split combined_df into train and test
+train_df = combined_df.loc[:wf_split]
+test_df = combined_df.loc[wf_split:]
+print(f'Train: {train_df.index[0].strftime("%Y-%m-%d")} to {train_df.index[-1].strftime("%Y-%m-%d")} ({len(train_df)} days)')
+print(f'Test:  {test_df.index[0].strftime("%Y-%m-%d")} to {test_df.index[-1].strftime("%Y-%m-%d")} ({len(test_df)} days)')
+
+# Optimize MA window on training data
+_, best_wf_window = mcpt_optimize_lrs(train_df['SPY'], train_df['FFR'])
+print(f'\nOptimal MA from training: SSO_LRS=MA{best_wf_window["SSO_LRS"]}, UPRO_LRS=MA{best_wf_window["UPRO_LRS"]}')
+
+def wf_compute_sharpe(spy_returns, ffr_returns, ma_windows):
+    '''Compute LRS Sharpe on given data using fixed MA windows (one per portfolio).'''
+    sso_returns = (spy_returns * etf_params['SSO']['lr']
+                   - (etf_params['SSO']['lr'] - 1) * (ffr_returns + borrowing_spread / trading_days)
+                   - ((1 + etf_params['SSO']['er']) ** (1/trading_days) - 1))
+    upro_returns = (spy_returns * etf_params['UPRO']['lr']
+                    - (etf_params['UPRO']['lr'] - 1) * (ffr_returns + borrowing_spread / trading_days)
+                    - ((1 + etf_params['UPRO']['er']) ** (1/trading_days) - 1))
+    spy_price = (1 + spy_returns).cumprod()
+
+    sharpes = {}
+    for pf, lev_ret in [('SSO_LRS', sso_returns), ('UPRO_LRS', upro_returns)]:
+        w = ma_windows[pf]
+        ma = spy_price.rolling(window=w).mean()
+        signal = (spy_price > ma).astype(int).shift(1, fill_value=1)
+
+        sig = signal.iloc[w:].reset_index(drop=True)
+        ffr_t = ffr_returns.iloc[w:].reset_index(drop=True)
+        lev_t = lev_ret.iloc[w:].reset_index(drop=True)
+
+        lrs = lev_t * sig + ffr_t * (1 - sig)
+        sharpes[pf] = np.sqrt(trading_days) * (lrs - ffr_t).mean() / lrs.std()
+
+    return sharpes
+
+# Compute real walk-forward Sharpe on test data
+real_wf_sharpe = wf_compute_sharpe(test_df['SPY'].reset_index(drop=True),
+                                    test_df['FFR'].reset_index(drop=True),
+                                    best_wf_window)
+
+print('Real walk-forward Sharpe:')
+for pf in mcpt_portfolios:
+    print(f'  {pf}: {real_wf_sharpe[pf]:.4f} (MA{best_wf_window[pf]})')
+
+# Permutation test: shuffle only test period
+wf_perm_better = {pf: 1 for pf in mcpt_portfolios}
+wf_permuted_sharpes = {pf: [] for pf in mcpt_portfolios}
+
+for i in range(1, wf_n_permutations):
+    if i % 100 == 0:
+        print(f'WF Permutation {i}/{wf_n_permutations}')
+
+    perm_test = test_df.sample(frac=1).reset_index(drop=True)
+    perm_wf_sharpe = wf_compute_sharpe(perm_test['SPY'], perm_test['FFR'], best_wf_window)
+
+    for pf in mcpt_portfolios:
+        wf_permuted_sharpes[pf].append(perm_wf_sharpe[pf])
+        if perm_wf_sharpe[pf] >= real_wf_sharpe[pf]:
+            wf_perm_better[pf] += 1
+
+print('\nWalk-Forward MCPT Results:')
+for pf in mcpt_portfolios:
+    p_value = wf_perm_better[pf] / wf_n_permutations
+    print(f'  {pf}: p-value = {p_value:.4f} ({wf_perm_better[pf]}/{wf_n_permutations} permutations >= real)')
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+for ax, pf in zip(axes, mcpt_portfolios):
+    ax.hist(wf_permuted_sharpes[pf], bins=50, color='steelblue', edgecolor='black', alpha=0.7)
+    ax.axvline(real_wf_sharpe[pf], color='red', linewidth=2, label=f'Real ({real_wf_sharpe[pf]:.3f})')
+    p_val = wf_perm_better[pf] / wf_n_permutations
+    ax.set_title(f'{pf} Walk-Forward MCPT (p={p_val:.4f})')
+    ax.set_xlabel('Sharpe Ratio')
+    ax.set_ylabel('Count')
+    ax.legend()
+plt.tight_layout()
+plt.show()
+
 # %%
 
 '''TAX ON CAPITAL GAINS'''
@@ -622,9 +793,10 @@ def apply_final_tax(pf_tracker_df, cost_basis):
 start_price = 50000
 monthly_addition = 0
 days_simulated = (trading_days * 20)
-number_of_simulations = 10
+number_of_simulations = 50
 block_size = 7
 ma_window = window_size
+plot_sims = True
 
 portfolios_list = ['SPY', 'SSO', 'UPRO', 'SSO_LRS', 'UPRO_LRS']
 simulation_results = {pf: [] for pf in portfolios_list}
@@ -650,8 +822,8 @@ for sim in range(number_of_simulations):
     days_to_subtract = required_n_blocks * block_size - total_days_needed
     simulated_data = simulated_data.iloc[:len(simulated_data) - days_to_subtract]
     
-    print(float(pcnt_dfs['spy'].mean()), float(pcnt_dfs['spy'].std()))
-    print(float(simulated_data['SPY'].mean()), float(simulated_data['SPY'].std()))
+    #print(float(pcnt_dfs['spy'].mean()), float(pcnt_dfs['spy'].std()))
+    #print(float(simulated_data['SPY'].mean()), float(simulated_data['SPY'].std()))
 
     '''Below we calculate returns for all strategies: SPY, SSO, UPRO (2x/3x
     leveraged versions), and LRS variants that rotate to cash based on MA200 signal.'''
@@ -705,15 +877,16 @@ for sim in range(number_of_simulations):
     trades = abs(returns_df['LRS_Signal'].diff()).sum()
     trades_per_year = trades / (days_simulated / trading_days)
     print(f'Trades: {trades}, Trades/year: {trades_per_year:.1f}')
-
-    plt.figure()
-    plt.plot(spy_price_trimmed * start_price, label='SPY')
-    plt.plot(spy_ma_trimmed * start_price, label='MA200', linestyle='--')
-    for pf in ['SSO_LRS']:
-        plt.plot(pf_values[pf], label=pf)
-    plt.yscale('log')
-    plt.legend()
-    plt.show()
+    
+    if plot_sims:
+        plt.figure()
+        plt.plot(spy_price_trimmed * start_price, label='SPY')
+        plt.plot(spy_ma_trimmed * start_price, label='MA200', linestyle='--')
+        for pf in ['SSO_LRS']:
+            plt.plot(pf_values[pf], label=pf)
+        plt.yscale('log')
+        plt.legend()
+        plt.show()
  
 #%%
 
@@ -742,8 +915,8 @@ print(f'{number_of_simulations} simulations')
 
 stats_df = pd.DataFrame({
     'Mean': results_df.mean(),
-    '5th %ile': results_df.quantile(0.05),
-    '95th %ile': results_df.quantile(0.95)
+    '10th %ile': results_df.quantile(0.1),
+    '90th %ile': results_df.quantile(0.9)
 })
 
 x = np.arange(len(portfolios_list))
@@ -764,7 +937,7 @@ plt.show()
 
 # %% Path Visualization
 
-percentiles_to_plot = [0.05, 0.50, 0.95]
+percentiles_to_plot = [0.1, 0.50, 0.9]
 
 for percentile in percentiles_to_plot:
     percentile_idx = int(percentile * number_of_simulations)
