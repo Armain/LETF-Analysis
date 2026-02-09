@@ -2,6 +2,8 @@
 import sys
 import math
 import random
+import warnings
+warnings.simplefilter(action='ignore', category=Warning)
 
 from pathlib import Path
 
@@ -9,8 +11,6 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import warnings
-warnings.simplefilter(action='ignore', category=Warning)
 
 cwd = Path(__file__).parent
 sys.path.append(str(cwd))
@@ -27,13 +27,42 @@ upro_lr = 3
 
 borrowing_spread = 0.007
 trading_days = 252 
-start_price = 50000
 starting_value = 10000
-rf_rate = 1.03 ** (1 / trading_days) - 1
 
-monthly_addition = 10000
-days_simulated = (trading_days * 15) 
-number_of_simulations = 15000
+# %% Colors
+COLORS = {
+        # Base portfolios
+        'VOO': '#41ab5d',
+        'SSO': '#88419d',
+        'UPRO': '#810f7c',
+        'GLD': 'gold',
+        'HFEA': 'gray',
+        'ZROZ': 'green',
+        '60/40_SSO_ZROZ': 'crimson',
+        '50/25/25_SSO_ZROZ_GLD': 'magenta',
+        # LRS portfolios
+        'VOO_LRS': '#8c96c6',
+        'SSO_LRS': '#88419d',
+        'UPRO_LRS': '#810f7c',
+        '70/15/15_SSO_LRS_ZROZ_GLD': 'pink',
+        '70/15/15_SSO_LRS_ZROZ_GLD2': 'fuchsia',
+        # Net portfolios (after tax)
+        'VOO_net': '#41ab5d',
+        'SSO_net': '#88419d',
+        'UPRO_net': '#810f7c',
+        'GLD_net': 'gold',
+        'HFEA_net': 'gray',
+        'ZROZ_net': 'g',
+        '60/40_SSO_ZROZ_net': 'crimson',
+        '50/25/25_SSO_ZROZ_GLD_net': 'magenta',
+        '70/15/15_SSO_LRS_ZROZ_GLD_net': 'pink',
+        '70/15/15_SSO_LRS_ZROZ_GLD2_net': 'fuchsia',
+        # LRS net portfolios (after tax)
+        'VOO_LRS_net': '#8c96c6',
+        'SSO_LRS_net': '#88419d',
+        'UPRO_LRS_net': '#810f7c'
+        
+    }  
     
 #%%
 '''SETUP SECTION'''
@@ -96,17 +125,19 @@ upro_price = starting_value * (1 + upro).cumprod()
 #%% Plot Simulated and Actual LETFs
 sso_price[['SSO', 'SSO Simulated']].plot(logy=True)
 upro_price[['UPRO', 'UPRO Simulated']].plot(logy=True)
+plt.show()
 
 #%% Plot tracking errors
 sso['T.E.'].plot()
 upro['T.E.'].plot()
+plt.show()
 
 # %%
 
 '''Prepare the dataframe for the simulation, ensuring the dates are accurate 
 for all sources.'''
 
-combined_df_3 = pd.concat([spy, ffr], axis=1).dropna()
+combined_df = pd.concat([spy, ffr], axis=1).dropna()
 
 daily_pcnt['60/40_SSO_ZROZ'] = 0.6 * daily_pcnt['SSO'] + 0.4 * daily_pcnt['ZROZ']
 
@@ -117,7 +148,10 @@ pf_tracker = portfolios.copy()
 pf_tracker['SPY_MA'] = pf_tracker['SPY'] * sp500_price['SPY_MA'] / sp500_price['SPY']
 
 portfolios = portfolios.drop(['SPY', 'FFR', 'GLD', 'ZROZ'], axis=1)
-portfolios.plot(logy=True, grid=True)
+
+portfolios_reindexed = portfolios.copy().dropna()
+portfolios_reindexed /= portfolios_reindexed.iloc[1] * starting_value
+portfolios_reindexed.plot(logy=True, grid=True)
 
 # %%
 
@@ -301,43 +335,10 @@ def plot_metric_comparison(results_df, metric_name, show_tax=None):
             # Show only untaxed portfolios (no _net)
             portfolios = [col for col in portfolios if '_net' not in col]
     
-    colors = {
-        # Base portfolios
-        'VOO': '#41ab5d',
-        'SSO': '#88419d',
-        'UPRO': '#810f7c',
-        'GLD': 'gold',
-        'HFEA': 'gray',
-        'ZROZ': 'green',
-        '60/40_SSO_ZROZ': 'crimson',
-        '50/25/25_SSO_ZROZ_GLD': 'magenta',
-        # LRS portfolios
-        'VOO_LRS': '#8c96c6',
-        'SSO_LRS': '#88419d',
-        'UPRO_LRS': '#810f7c',
-        '70/15/15_SSO_LRS_ZROZ_GLD': 'pink',
-        '70/15/15_SSO_LRS_ZROZ_GLD2': 'fuchsia',
-        # Net portfolios (after tax)
-        'VOO_net': '#41ab5d',
-        'SSO_net': '#88419d',
-        'UPRO_net': '#810f7c',
-        'GLD_net': 'gold',
-        'HFEA_net': 'gray',
-        'ZROZ_net': 'g',
-        '60/40_SSO_ZROZ_net': 'crimson',
-        '50/25/25_SSO_ZROZ_GLD_net': 'magenta',
-        '70/15/15_SSO_LRS_ZROZ_GLD_net': 'pink',
-        '70/15/15_SSO_LRS_ZROZ_GLD2_net': 'fuchsia',
-        # LRS net portfolios (after tax)
-        'VOO_LRS_net': '#8c96c6',
-        'SSO_LRS_net': '#88419d',
-        'UPRO_LRS_net': '#810f7c'
-        
-    }  
     
     for portfolio in portfolios:
         df = results_df[['End Date', f'{portfolio} {metric_name}']].dropna()
-        plt.plot(df['End Date'], df[f'{portfolio} {metric_name}'], label=portfolio, color=colors[portfolio], linewidth=1.0)
+        plt.plot(df['End Date'], df[f'{portfolio} {metric_name}'], label=portfolio, color=COLORS[portfolio], linewidth=1.0)
     
     plt.gca().xaxis.set_major_locator(mdates.YearLocator(5))  # Major ticks every 10 years
     plt.gca().xaxis.set_minor_locator(mdates.YearLocator(1))   # Minor ticks every 2 years
@@ -363,7 +364,7 @@ metrics = calculate_metrics(portfolios, reindex=True, df=True)
 print(metrics)
 
 period_length = 240
-rolling_analysis, win_rate_df = analyze_rolling_periods(portfolios, period_length, reindex=True)
+rolling_analysis, win_rate_df = analyze_rolling_periods(portfolios.drop(['SSO', 'UPRO'], axis=1), period_length, reindex=True)
 
 print('\nWin Rate vs SPY (% of periods):')
 print(win_rate_df)
@@ -439,7 +440,7 @@ lrs_cols = ['VOO_LRS', 'SSO_LRS', 'UPRO_LRS', '70/15/15_SSO_LRS_ZROZ_GLD']
 # Calculate LRS pf_tracker
 pf_tracker[lrs_cols] = starting_value * (1 + daily_pcnt[lrs_cols]).cumprod()
 
-lrs_portfolios = pf_tracker[['VOO', 'HFEA', '60/40_SSO_ZROZ', '50/25/25_SSO_ZROZ_GLD'] + lrs_cols]
+lrs_portfolios = pf_tracker[['VOO', '60/40_SSO_ZROZ', '50/25/25_SSO_ZROZ_GLD'] + lrs_cols]
 # lrs_portfolios.plot(logy=True)
 
 lrs_portfolios = starting_value * (1 + daily_pcnt).cumprod()
@@ -498,22 +499,14 @@ def analyze_multi_period_win_rate(portfolio, max_months=360, step=12, consider_t
 def plot_win_rate(plot_data):
     '''
     Plot Win Rate across different time periods for each metric
-    '''
-    colors = {
-        'VOO_LRS': '#8c96c6',
-        'SSO_LRS': '#88419d',
-        'UPRO_LRS': '#810f7c',
-        'VOO_LRS_net': '#8c96c6',
-        'SSO_LRS_net': '#88419d',
-        'UPRO_LRS_net': '#810f7c'
-    }
+    '''  
     
     for metric, data in plot_data.items():
         plt.figure(figsize=(8, 6))
         
         for portfolio in data.index:
             plt.plot(data.columns, data.loc[portfolio], 
-                    label=portfolio, color=colors[portfolio], linewidth=2.0)
+                    label=portfolio, color=COLORS[portfolio], linewidth=2.0)
         
         plt.title(f'{metric} Win Rate vs SPY Over Different Rolling Periods')
         plt.xlabel('Rolling Period Length (Years)')
@@ -619,10 +612,12 @@ plot_metric_comparison(taxed_lrs_rolling_analysis, 'CAGR (%)', show_tax=True)
 # plot_data_taxed = analyze_multi_period_win_rate(lrs_portfolios, max_months=360, step=12, consider_tax=True, daily_pcnt_df=daily_pcnt)
 # plot_win_rate(plot_data_taxed)
 
-# %%
+# %% SIMULATION SECTION
 
-'''SIMULATION SECTION'''
-
+start_price = 50000
+monthly_addition = 10000
+days_simulated = (trading_days * 15) 
+number_of_simulations = 10
  
 rows = []
 percentiles = [0.01, 0.05, 0.10, 0.25, 0.40, 0.50, 0.60, 0.75, 0.90, 0.95, 0.99]
@@ -642,12 +637,12 @@ for i in range(number_of_simulations):
     federal funds rate (FRR) is also stored in this dataframe.'''
  
     block_size = 7  # days
-    if block_size > len(combined_df_3):
+    if block_size > len(combined_df):
         sys.exit('ERROR: Block size is greater than the sample size')
-    n_blocks = len(combined_df_3) - block_size + 1
+    n_blocks = len(combined_df) - block_size + 1
     blocks = []
     for i in range(n_blocks):
-        block = combined_df_3.iloc[i:i + block_size]
+        block = combined_df.iloc[i:i + block_size]
         blocks.append(block)
  
     required_n_blocks = math.ceil(days_simulated / block_size)
@@ -659,27 +654,23 @@ for i in range(number_of_simulations):
  
     simulated_spy = pd.concat(simulated_blocks).reset_index(drop=True)
     days_to_subtract = required_n_blocks * block_size - days_simulated
-    simulated_spy = simulated_spy.iloc[
-                      :len(simulated_spy) - days_to_subtract]
+    simulated_spy = simulated_spy.iloc[:len(simulated_spy) - days_to_subtract]
  
     '''Below we simulate the SSO and UPRO beyond their inception dates.
     To do this, we take the simulated S&P500 above, and multiply each daily
     return by 2x for the SSO and 3x for the UPRO. We subtract the expected 
     borrowing costs using the interest rates at that time, subtract the 
-    expense ratios, and then, for each daily return, we RANDOMLY add some 
-    tracking error to keep it realistic.
+    expense ratios
  
     simulated_sso: a simulated path of the SSO's daily returns for a
     specified amount of days, stored in a pandas dataframe as decimals.
     simulated_upro: same as simulated_sso but for the UPRO ETF.'''
  
-    simulated_sso = pd.Series(np.random.choice(sso['T.E.'].values, size=days_simulated) +
-                              simulated_spy['SPY'] * 2
+    simulated_sso = pd.Series(simulated_spy['SPY'] * 2
                               - ((etf_params['SSO']['lr'] - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
                               - (etf_params['SSO']['er'] / 365)).reset_index(drop=True)
     
-    simulated_upro = pd.Series(np.random.choice(upro['T.E.'].values, size=days_simulated) +
-                               simulated_spy['SPY'] * 3
+    simulated_upro = pd.Series(simulated_spy['SPY'] * 3
                                - ((etf_params['UPRO']['lr'] - 1) * (simulated_spy['FFR'] + borrowing_spread / 360))
                                - (etf_params['UPRO']['er'] / 365)).reset_index(drop=True)
 
